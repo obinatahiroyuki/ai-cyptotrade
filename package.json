@@ -1,0 +1,29 @@
+{
+  "name": "ai-cyptotrade",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:webpack": "next dev --webpack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:migrate": "turso db shell ai-cyptotrade < db/migrations/001_initial.sql"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.0",
+    "next": "15.3.6",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.3.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
