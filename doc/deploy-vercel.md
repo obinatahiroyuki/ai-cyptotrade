@@ -58,6 +58,7 @@ git push -u origin main
 | `AUTH_SECRET` | `openssl rand -base64 32` で生成 | NextAuth用 |
 | `AUTH_GITHUB_ID` | GitHub OAuth AppのClient ID | `doc/auth-setup.md` 参照 |
 | `AUTH_GITHUB_SECRET` | GitHub OAuth AppのClient Secret | 同上 |
+| `ENCRYPTION_KEY` | APIキー暗号化用（32文字以上） | `openssl rand -base64 32` で生成 |
 
 ※本番用トークンを使う場合は、要件定義書「9. 本番環境移行チェックリスト」を参照して再発行すること。
 

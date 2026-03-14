@@ -31,8 +31,16 @@ export default async function Home() {
           <p className="text-zinc-600">
             ようこそ、{session?.user?.name ?? session?.user?.email} さん。
           </p>
+          <div className="mt-6 flex gap-4">
+            <a
+              href="/settings/exchange"
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+            >
+              Bitget 連携設定
+            </a>
+          </div>
           <p className="mt-4 text-sm text-zinc-500">
-            取引所連携やポジション表示などの機能は、今後の開発で追加されます。
+            ポジション表示などの機能は、今後の開発で追加されます。
           </p>
         </div>
       </main>
