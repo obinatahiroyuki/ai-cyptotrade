@@ -1,14 +1,40 @@
+import type { NextAuthOptions } from "next-auth";
 import NextAuth from "next-auth";
-import GitHub from "next-auth/providers/github";
+import GitHubProvider from "next-auth/providers/github";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  providers: [GitHub],
+export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET,
+  providers: [
+    GitHubProvider({
+      clientId: process.env.GITHUB_ID!,
+      clientSecret: process.env.GITHUB_SECRET!,
+    }),
+  ],
   pages: {
     signIn: "/login",
+    error: "/auth/error",
+  },
+  debug: process.env.NODE_ENV === "development",
+  events: {
+    async signIn(message) {
+      console.log("[NextAuth] signIn:", message);
+    },
   },
   callbacks: {
+    async jwt({ token, user }) {
+      if (user) token.id = user.id;
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user) session.user.id = token.id as string;
+      return session;
+    },
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      if (new URL(url).origin === baseUrl) return url;
+      return baseUrl + "/";
+    },
     async signIn({ user }) {
-      // 初回ログイン時にusersテーブルに登録
       if (user.email) {
         try {
           const { db } = await import("@/lib/db");
@@ -25,4 +51,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true;
     },
   },
-});
+};
+
+const handler = NextAuth(authOptions);
+
+export { handler as GET, handler as POST };

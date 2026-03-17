@@ -3,17 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000 -H 127.0.0.1",
     "dev:webpack": "next dev --webpack",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3000",
     "lint": "eslint",
+    "worker": "npx tsx worker/main.ts",
     "db:migrate": "turso db shell ai-cyptotrade < db/migrations/001_initial.sql"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@libsql/client": "^0.17.0",
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.3.1",
     "next": "15.3.6",
-    "next-auth": "^5.0.0-beta.30",
+    "next-auth": "^4.24.13",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
@@ -25,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.3.6",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

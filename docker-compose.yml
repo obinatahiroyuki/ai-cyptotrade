@@ -1,0 +1,22 @@
+# ai-cyptotrade サーバー統合構成
+# 使い方: docker-compose up -d
+# .env.production を事前に作成すること
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.production
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file:
+      - .env.production
+    restart: unless-stopped

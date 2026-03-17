@@ -1,0 +1,17 @@
+# ワーカー用 Docker イメージ
+# ビルド: docker build -f Dockerfile.worker -t ai-cyptotrade-worker .
+# 実行: docker run --env-file .env.production ai-cyptotrade-worker
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY worker/ ./worker/
+COPY lib/ ./lib/
+COPY db/ ./db/
+
+ENV NODE_ENV=production
+CMD ["npm", "run", "worker"]

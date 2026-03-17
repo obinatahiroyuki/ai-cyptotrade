@@ -20,6 +20,7 @@ turso db shell ai-cyptotrade ".tables"
 - `exchange_connections` - 取引所API接続（暗号化）
 - `positions` - 現在のポジション
 - `trades` - 取引履歴
+- `risk_settings` - リスク管理設定
 - `agent_settings` - エージェント設定
 - `alerts` - 通知設定
 

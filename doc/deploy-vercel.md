@@ -1,5 +1,7 @@
 # Vercel デプロイ手順
 
+**GitHub + Vercel + Turso 運用ガイド**は `doc/github-vercel-turso-guide.md` にまとめています。
+
 ## 前提条件
 
 - GitHub アカウント
@@ -49,18 +51,19 @@ git push -u origin main
 
 ### 2-2. 環境変数を設定
 
-「Environment Variables」で以下を追加:
+「Environment Variables」で以下を追加（**Production** にチェック）:
 
 | 名前 | 値 | 備考 |
 |------|-----|------|
-| `TURSO_DATABASE_URL` | `libsql://ai-cyptotrade-xxx.turso.io` | `.env.local` の値 |
-| `TURSO_AUTH_TOKEN` | （トークン） | `.env.local` の値 |
-| `AUTH_SECRET` | `openssl rand -base64 32` で生成 | NextAuth用 |
-| `AUTH_GITHUB_ID` | GitHub OAuth AppのClient ID | `doc/auth-setup.md` 参照 |
-| `AUTH_GITHUB_SECRET` | GitHub OAuth AppのClient Secret | 同上 |
+| `TURSO_DATABASE_URL` | `libsql://ai-cyptotrade-xxx.turso.io` | Turso の接続 URL |
+| `TURSO_AUTH_TOKEN` | （トークン） | 本番用は再発行推奨 |
+| `NEXTAUTH_SECRET` | `openssl rand -base64 32` で生成 | NextAuth 用 |
+| `NEXTAUTH_URL` | `https://あなたのプロジェクト.vercel.app` | デプロイ後の実際の URL |
+| `GITHUB_ID` | GitHub OAuth App の Client ID | 本番用 OAuth App を推奨 |
+| `GITHUB_SECRET` | GitHub OAuth App の Client Secret | 同上 |
 | `ENCRYPTION_KEY` | APIキー暗号化用（32文字以上） | `openssl rand -base64 32` で生成 |
 
-※本番用トークンを使う場合は、要件定義書「9. 本番環境移行チェックリスト」を参照して再発行すること。
+※本番移行時は `doc/production-setup.md` のセキュリティ準備を参照し、シークレットを再発行・再生成すること。
 
 ### 2-3. デプロイ実行
 
