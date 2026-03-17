@@ -211,7 +211,7 @@ export async function placeSpotMarketBuy(
     console.log(`[PAPER] Would BUY ${symbol} $${quoteAmount}`);
     return {
       success: true,
-      data: { orderId: `paper-buy-${Date.now()}`, clientOrderId: "" },
+      data: { orderId: `paper-buy-${Date.now()}`, clientOid: "" },
     };
   }
 
@@ -245,7 +245,7 @@ export async function placeSpotMarketSell(
     console.log(`[PAPER] Would SELL ${symbol} qty=${quantity}`);
     return {
       success: true,
-      data: { orderId: `paper-sell-${Date.now()}`, clientOrderId: "" },
+      data: { orderId: `paper-sell-${Date.now()}`, clientOid: "" },
     };
   }
 
