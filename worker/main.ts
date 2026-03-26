@@ -24,13 +24,10 @@ const POLL_INTERVAL_MS = 30_000;
 const BITGET_BASE = "https://api.bitget.com";
 
 // ============================================================
-// DB
+// DB（main() で環境変数確認後に初期化 — 未設定時は LibsqlError ではなく Missing: を出す）
 // ============================================================
 
-const db = createClient({
-  url: process.env.TURSO_DATABASE_URL!,
-  authToken: process.env.TURSO_AUTH_TOKEN!,
-});
+let db!: ReturnType<typeof createClient>;
 
 // ============================================================
 // Types
@@ -601,6 +598,11 @@ async function main() {
   for (const key of required) {
     if (!process.env[key]) { console.error(`Missing: ${key}`); process.exit(1); }
   }
+
+  db = createClient({
+    url: process.env.TURSO_DATABASE_URL!,
+    authToken: process.env.TURSO_AUTH_TOKEN!,
+  });
 
   const userId = await getFirstUserId();
   if (!userId) {
