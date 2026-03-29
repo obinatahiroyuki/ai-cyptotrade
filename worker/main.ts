@@ -11,7 +11,7 @@ import { config } from "dotenv";
 import { resolve } from "path";
 config({ path: resolve(__dirname, "../.env.local") });
 
-import { createClient } from "@libsql/client";
+import { createClient, type InStatement } from "@libsql/client";
 import { Client, GatewayIntentBits, Events } from "discord.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { createHmac, createDecipheriv, scryptSync } from "crypto";
@@ -28,6 +28,37 @@ const BITGET_BASE = "https://api.bitget.com";
 // ============================================================
 
 let db!: ReturnType<typeof createClient>;
+
+/** Turso への接続が一時的にタイムアウトしても、数回まで自動リトライする */
+function isRetryableDbError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("ECONNREFUSED") ||
+    msg.includes("fetch failed") ||
+    msg.includes("UND_ERR_CONNECT_TIMEOUT") ||
+    msg.includes("socket hang up")
+  );
+}
+
+async function dbExecute(stmt: InStatement) {
+  const maxAttempts = 5;
+  const baseMs = 800;
+  let last: unknown;
+  for (let a = 0; a < maxAttempts; a++) {
+    try {
+      return await db.execute(stmt);
+    } catch (e) {
+      last = e;
+      if (!isRetryableDbError(e) || a === maxAttempts - 1) throw e;
+      const delay = baseMs * 2 ** a;
+      console.warn(`[Worker] DB transient error, retry ${a + 1}/${maxAttempts} in ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw last;
+}
 
 // ============================================================
 // Types
@@ -182,7 +213,7 @@ async function fetchSpotSymbols(): Promise<string[]> {
 // ============================================================
 
 async function getActivePositions(): Promise<ActivePosition[]> {
-  const r = await db.execute({
+  const r = await dbExecute({
     sql: `SELECT id, signal_id, user_id, symbol, bitget_symbol, entry_price,
                  current_stop_loss, current_round, total_quantity, total_invested
           FROM signal_positions WHERE status = 'active'`,
@@ -203,14 +234,14 @@ async function getActivePositions(): Promise<ActivePosition[]> {
 }
 
 async function getNextTarget(signalId: string, currentRound: number): Promise<SignalTarget | null> {
-  const r = await db.execute({ sql: "SELECT targets FROM signals WHERE id = ?", args: [signalId] });
+  const r = await dbExecute({ sql: "SELECT targets FROM signals WHERE id = ?", args: [signalId] });
   if (r.rows.length === 0) return null;
   const targets = JSON.parse(r.rows[0].targets as string) as SignalTarget[];
   return targets.find((t) => t.round === currentRound + 1) ?? null;
 }
 
 async function getInvestmentSettings(userId: string): Promise<InvestmentSettings> {
-  const r = await db.execute({ sql: "SELECT * FROM investment_settings WHERE user_id = ?", args: [userId] });
+  const r = await dbExecute({ sql: "SELECT * FROM investment_settings WHERE user_id = ?", args: [userId] });
   if (r.rows.length === 0) return DEFAULT_SETTINGS;
   const row = r.rows[0];
   return {
@@ -231,7 +262,7 @@ function calcTradeAmount(settings: InvestmentSettings, round: number): number {
 }
 
 async function getCredentials(userId: string): Promise<Credentials | null> {
-  const r = await db.execute({
+  const r = await dbExecute({
     sql: `SELECT api_key_encrypted, api_secret_encrypted, api_passphrase_encrypted
           FROM exchange_connections WHERE user_id = ? AND exchange_name = 'bitget' AND is_active = 1 LIMIT 1`,
     args: [userId],
@@ -246,12 +277,12 @@ async function getCredentials(userId: string): Promise<Credentials | null> {
 }
 
 async function getFirstUserId(): Promise<string | null> {
-  const r = await db.execute({ sql: "SELECT id FROM users LIMIT 1", args: [] });
+  const r = await dbExecute({ sql: "SELECT id FROM users LIMIT 1", args: [] });
   return r.rows.length > 0 ? (r.rows[0].id as string) : null;
 }
 
 async function getPrevTargetPrice(signalId: string, round: number): Promise<number> {
-  const r = await db.execute({ sql: "SELECT targets, reference_price FROM signals WHERE id = ?", args: [signalId] });
+  const r = await dbExecute({ sql: "SELECT targets, reference_price FROM signals WHERE id = ?", args: [signalId] });
   if (r.rows.length === 0) return 0;
   const targets = JSON.parse(r.rows[0].targets as string) as SignalTarget[];
   const t = targets.find((x) => x.round === round);
@@ -335,7 +366,7 @@ async function handleNewSignal(text: string, discordMsgId: string, userId: strin
 
 async function _handleNewSignal(text: string, discordMsgId: string, userId: string): Promise<string> {
   try {
-    const existing = await db.execute({ sql: "SELECT id FROM signals WHERE discord_message_id = ?", args: [discordMsgId] });
+    const existing = await dbExecute({ sql: "SELECT id FROM signals WHERE discord_message_id = ?", args: [discordMsgId] });
     if (existing.rows.length > 0) return "duplicate";
   } catch { /* proceed */ }
 
@@ -350,7 +381,7 @@ async function _handleNewSignal(text: string, discordMsgId: string, userId: stri
   if (parsed.type === "entry") {
     const signalId = crypto.randomUUID();
     try {
-      await db.execute({
+      await dbExecute({
         sql: `INSERT INTO signals (id, discord_message_id, signal_type, symbol,
                 entry_price_low, entry_price_high, reference_price, stop_loss_price,
                 targets, long_term_target, raw_text, status)
@@ -380,14 +411,14 @@ async function _handleNewSignal(text: string, discordMsgId: string, userId: stri
     }
 
     // 既に当該銘柄を保有している場合は購入しない（達成報告後の再エントリー防止）
-    const existingPos = await db.execute({
+    const existingPos = await dbExecute({
       sql: `SELECT id FROM signal_positions
             WHERE user_id = ? AND bitget_symbol = ? AND status = 'active' LIMIT 1`,
       args: [userId, bgSymbol],
     });
     if (existingPos.rows.length > 0) {
       console.log(`[Worker] Already holding ${parsed.symbol}, skip entry`);
-      await db.execute({ sql: "UPDATE signals SET status = 'skipped' WHERE id = ?", args: [signalId] });
+      await dbExecute({ sql: "UPDATE signals SET status = 'skipped' WHERE id = ?", args: [signalId] });
       return "already_holding";
     }
 
@@ -402,7 +433,7 @@ async function _handleNewSignal(text: string, discordMsgId: string, userId: stri
 
     if (currentPrice < priceLow * 0.95 || currentPrice > piceHigh * 1.05) {
       console.log(`[Worker] Price out of range: ${parsed.symbol} current=$${currentPrice}, range=$${priceLow}~$${piceHigh}`);
-      await db.execute({ sql: "UPDATE signals SET status = 'skipped' WHERE id = ?", args: [signalId] });
+      await dbExecute({ sql: "UPDATE signals SET status = 'skipped' WHERE id = ?", args: [signalId] });
       return "price_out_of_range";
     }
 
@@ -421,7 +452,7 @@ async function _handleNewSignal(text: string, discordMsgId: string, userId: stri
 
     const qty = investAmount / currentPrice;
     const posId = crypto.randomUUID();
-    await db.execute({
+    await dbExecute({
       sql: `INSERT INTO signal_positions
               (id, signal_id, user_id, symbol, bitget_symbol, entry_price,
                current_stop_loss, current_round, total_quantity, total_invested, status)
@@ -430,7 +461,7 @@ async function _handleNewSignal(text: string, discordMsgId: string, userId: stri
         parsed.stopLossPrice, qty, investAmount],
     });
 
-    await db.execute({
+    await dbExecute({
       sql: `INSERT INTO signal_trade_log
               (id, position_id, action, price, quantity, amount_usd, round_at_trade, reason, bitget_order_id)
             VALUES (?, ?, 'buy_entry', ?, ?, ?, 0, ?, ?)`,
@@ -438,10 +469,10 @@ async function _handleNewSignal(text: string, discordMsgId: string, userId: stri
         `New signal entry (ref=$${parsed.referencePrice}, market=$${currentPrice})`, order.data.orderId],
     });
 
-    await db.execute({ sql: "UPDATE signals SET status = 'active' WHERE id = ?", args: [signalId] });
+    await dbExecute({ sql: "UPDATE signals SET status = 'active' WHERE id = ?", args: [signalId] });
 
     if (settings.interestMode === "compound") {
-      await db.execute({
+      await dbExecute({
         sql: "UPDATE investment_settings SET compound_current_round = compound_current_round + 1, updated_at = datetime('now') WHERE user_id = ?",
         args: [userId],
       });
@@ -454,7 +485,7 @@ async function _handleNewSignal(text: string, discordMsgId: string, userId: stri
   if (parsed.type === "achievement") {
     const signalId = crypto.randomUUID();
     try {
-      await db.execute({
+      await dbExecute({
         sql: "INSERT INTO signals (id, discord_message_id, signal_type, symbol, raw_text, status) VALUES (?, ?, 'achievement', ?, ?, 'completed')",
         args: [signalId, discordMsgId, parsed.symbol, text],
       });
@@ -467,7 +498,7 @@ async function _handleNewSignal(text: string, discordMsgId: string, userId: stri
   }
 
   try {
-    await db.execute({
+    await dbExecute({
       sql: "INSERT INTO signals (id, discord_message_id, signal_type, symbol, raw_text, status) VALUES (?, ?, 'other', ?, ?, 'skipped')",
       args: [crypto.randomUUID(), discordMsgId, parsed.summary ?? "other", text],
     });
@@ -489,18 +520,18 @@ async function handleTargetReached(pos: ActivePosition, price: number, target: S
   if (settings.profitMode === "take_profit") {
     const order = await sellMarket(creds, pos.bitgetSymbol, pos.totalQuantity.toString());
     const pnl = price * pos.totalQuantity - pos.totalInvested;
-    await db.execute({
+    await dbExecute({
       sql: `INSERT INTO signal_trade_log (id, position_id, action, price, quantity, amount_usd, round_at_trade, reason, bitget_order_id)
             VALUES (?, ?, 'sell_target', ?, ?, ?, ?, ?, ?)`,
       args: [crypto.randomUUID(), pos.id, price, pos.totalQuantity,
         price * pos.totalQuantity, newRound, `Take profit at +${newRound * 10}%`, order.data?.orderId ?? null],
     });
-    await db.execute({
+    await dbExecute({
       sql: `UPDATE signal_positions SET status = 'closed_target', closed_at = datetime('now'),
               realized_pnl = ?, updated_at = datetime('now') WHERE id = ?`,
       args: [pnl, pos.id],
     });
-    await db.execute({ sql: "UPDATE signals SET status = 'completed' WHERE id = ? AND status = 'active'", args: [pos.signalId] });
+    await dbExecute({ sql: "UPDATE signals SET status = 'completed' WHERE id = ? AND status = 'active'", args: [pos.signalId] });
     console.log(`[Worker] TAKE PROFIT: ${pos.symbol} @ ${price}, PnL: $${pnl.toFixed(2)}`);
     return;
   }
@@ -517,7 +548,7 @@ async function handleTargetReached(pos: ActivePosition, price: number, target: S
       if (order.code === "00000") {
         addQty = amt / price;
         addAmt = amt;
-        await db.execute({
+        await dbExecute({
           sql: `INSERT INTO signal_trade_log (id, position_id, action, price, quantity, amount_usd, round_at_trade, reason, bitget_order_id)
                 VALUES (?, ?, 'buy_add', ?, ?, ?, ?, ?, ?)`,
           args: [crypto.randomUUID(), pos.id, price, addQty, addAmt, newRound,
@@ -527,7 +558,7 @@ async function handleTargetReached(pos: ActivePosition, price: number, target: S
     }
   }
 
-  await db.execute({
+  await dbExecute({
     sql: `UPDATE signal_positions SET current_round = ?, current_stop_loss = ?,
             total_quantity = total_quantity + ?, total_invested = total_invested + ?,
             updated_at = datetime('now') WHERE id = ?`,
@@ -540,18 +571,18 @@ async function handleTargetReached(pos: ActivePosition, price: number, target: S
 async function handleStopLoss(pos: ActivePosition, price: number, creds: Credentials) {
   const order = await sellMarket(creds, pos.bitgetSymbol, pos.totalQuantity.toString());
   const pnl = price * pos.totalQuantity - pos.totalInvested;
-  await db.execute({
+  await dbExecute({
     sql: `INSERT INTO signal_trade_log (id, position_id, action, price, quantity, amount_usd, round_at_trade, reason, bitget_order_id)
           VALUES (?, ?, 'sell_stoploss', ?, ?, ?, ?, ?, ?)`,
     args: [crypto.randomUUID(), pos.id, price, pos.totalQuantity,
       price * pos.totalQuantity, pos.currentRound, `Stop-loss @ ${price}`, order.data?.orderId ?? null],
   });
-  await db.execute({
+  await dbExecute({
     sql: `UPDATE signal_positions SET status = 'closed_stoploss', closed_at = datetime('now'),
             realized_pnl = ?, updated_at = datetime('now') WHERE id = ?`,
     args: [pnl, pos.id],
   });
-  await db.execute({ sql: "UPDATE signals SET status = 'completed' WHERE id = ? AND status = 'active'", args: [pos.signalId] });
+  await dbExecute({ sql: "UPDATE signals SET status = 'completed' WHERE id = ? AND status = 'active'", args: [pos.signalId] });
   console.log(`[Worker] STOP-LOSS: ${pos.symbol} @ ${price}, PnL: $${pnl.toFixed(2)}`);
 }
 
