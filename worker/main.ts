@@ -651,6 +651,8 @@ async function main() {
 
   if (discordToken && channelIds.length > 0) {
     const channelIdSet = new Set(channelIds);
+    /** 講師側が Bot アカウントで投稿するコミュニティ向け。未設定/false のときは人間投稿のみ処理 */
+    const processBotMessages = process.env.DISCORD_PROCESS_BOT_MESSAGES === "true";
     const client = new Client({
       intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
     });
@@ -659,11 +661,19 @@ async function main() {
       console.log(`[Discord] Logged in as ${c.user.tag}`);
       console.log(`[Discord] Monitoring ${channelIds.length} channel(s): ${channelIds.join(", ")}`);
       console.log(`[Discord] Guilds: ${c.guilds.cache.map(g => `${g.name} (${g.id})`).join(", ") || "none"}`);
+      if (processBotMessages) {
+        console.log("[Discord] DISCORD_PROCESS_BOT_MESSAGES=true — other bots' posts in monitored channels will be parsed");
+      }
     });
 
     client.on(Events.MessageCreate, async (msg) => {
       console.log(`[Discord] Message received: channel=${msg.channelId}, author=${msg.author.tag}, bot=${msg.author.bot}, content_length=${msg.content.length}`);
-      if (msg.author.bot || !channelIdSet.has(msg.channelId)) return;
+      if (msg.author.id === client.user?.id) return;
+      if (!channelIdSet.has(msg.channelId)) return;
+      if (!processBotMessages && msg.author.bot) {
+        console.log(`[Discord] Skip bot message (set DISCORD_PROCESS_BOT_MESSAGES=true to parse): ${msg.author.tag}`);
+        return;
+      }
       try {
         const result = await handleNewSignal(msg.content, msg.id, userId);
         console.log(`[Discord] Processed message ${msg.id}: ${result}`);
